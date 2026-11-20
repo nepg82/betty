@@ -46,6 +46,9 @@ select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:
 .switch input{width:26px;height:26px;accent-color:var(--ok)}
 .sheet-actions{display:flex;gap:10px}
 .sheet-actions button{flex:1}
+.sheet-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 14px}
+.sheet-header h2{margin:0;font-size:1.3rem}
+.debug-stamp{background:none;border:0;border-radius:6px;min-height:0;padding:0;font:inherit;cursor:pointer;text-align:right;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -72,7 +75,10 @@ select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:
 
 <div id="sheet" hidden>
   <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sTitle">
-    <h2 id="sTitle">Alert settings</h2>
+    <div class="sheet-header">
+      <h2 id="sTitle">Alert settings</h2>
+      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261120-0930</button>
+    </div>
 
     <div class="field">
       <label class="switch" for="repeat"><span>Repeat until speed drops below the alert speed</span><input id="repeat" type="checkbox"></label>
@@ -255,6 +261,24 @@ $('voice').addEventListener('change', e => { cfg.voice = e.target.value; save();
 $('phrase').value = cfg.phrase === DEFAULT_PHRASE ? '' : cfg.phrase;
 $('phrase').addEventListener('input', e => { cfg.phrase = e.target.value.slice(0, 80); save(); });
 $('testVoice').addEventListener('click', () => speak(phrase()));
+
+/* ------------ debug ------------ */
+$('debugReset').addEventListener('click', async () => {
+  $('status').textContent = 'Resetting service worker & cache…';
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) {}
+  const url = new URL(location.href);
+  url.searchParams.set('_', Date.now());
+  location.replace(url.toString());
+});
 
 const openSheet = () => { $('sheet').hidden = false; $('closeSettings').focus(); };
 const closeSheet = () => { $('sheet').hidden = true; $('openSettings').focus(); };
