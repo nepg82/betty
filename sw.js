@@ -1,4 +1,4 @@
-const CACHE = 'speedcheck-v1.0.1';
+const CACHE = 'speedcheck-v1.0.7';
 const ASSETS = ['./', './index.html', './manifest.json', './app-icons/app-icon-192.png', './app-icons/app-icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
