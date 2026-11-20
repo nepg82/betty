@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12203a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Speed Check</title>
+<style>
+:root{--bg:#12203a;--fg:#eef2f6;--muted:#8fa3bf;--ok:#5fd0b0;--warn:#ff5a3c;--panel:#1b2d4d}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ display:flex;flex-direction:column;padding:env(safe-area-inset-top) 20px env(safe-area-inset-bottom);transition:background .2s}
+body.over{background:var(--warn);--muted:#ffe3dc;--panel:rgba(0,0,0,.25)}
+main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:0}
+#speed{font-size:min(44vw,38vh);font-weight:800;line-height:.9;font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+#unit{font-size:1.4rem;color:var(--muted);margin-top:.4rem}
+#status{margin-top:1.2rem;min-height:1.4em;color:var(--muted)}
+.controls{display:flex;flex-direction:column;gap:12px;padding:8px 0 18px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.stepper{display:flex;align-items:center;gap:6px;background:var(--panel);border-radius:14px;padding:4px;flex:1;justify-content:space-between}
+.stepper .lbl{color:var(--muted);padding-left:8px;font-size:.95rem}
+.stepper input{width:3.6ch;background:transparent;border:0;color:var(--fg);font:800 1.7rem system-ui,sans-serif;text-align:center;-moz-appearance:textfield}
+.stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none}
+.stepper .mid{display:flex;align-items:baseline;gap:4px}
+button{font:700 1.05rem system-ui,sans-serif;border:0;border-radius:12px;min-height:48px;padding:0 20px;background:var(--panel);color:var(--fg)}
+button.step{min-width:52px;font-size:1.5rem;padding:0}
+button.primary{background:var(--ok);color:#07261d;min-width:8.5rem}
+button.primary.on{background:var(--panel);color:var(--fg)}
+:focus-visible{outline:3px solid #fff;outline-offset:3px}
+/* settings sheet */
+#sheet{position:fixed;inset:0;background:rgba(5,10,20,.6);display:flex;align-items:flex-end;z-index:5}
+#sheet[hidden]{display:none}
+.sheet-body{width:100%;max-height:85%;overflow:auto;background:#1b2d4d;color:var(--fg);border-radius:20px 20px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom))}
+.sheet-body h2{margin:0 0 14px;font-size:1.3rem}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.field>label,.field>.t{font-weight:600}
+.hint{color:var(--muted);font-size:.9rem;margin:0}
+input[type=text]{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:2px solid #3a5280;background:#12203a;color:var(--fg);padding:0 12px;width:100%}
+select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:2px solid #3a5280;background:#12203a;color:var(--fg);padding:0 10px;width:100%}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px}
+.switch input{width:26px;height:26px;accent-color:var(--ok)}
+.sheet-actions{display:flex;gap:10px}
+.sheet-actions button{flex:1}
+</style>
+</head>
+<body>
+<main>
+  <div id="speed">--</div>
+  <div id="unit">mph</div>
+  <div id="status">Tap Start to begin tracking</div>
+</main>
+
+<div class="controls">
+  <div class="row">
+    <div class="stepper" role="group" aria-label="Alert speed">
+      <span class="lbl">Alert at</span>
+      <button class="step" id="minus" aria-label="Lower alert speed by 5">−</button>
+      <span class="mid"><input id="limit" type="number" inputmode="numeric" min="5" max="200" aria-label="Alert speed in mph"><span class="lbl" style="padding:0">mph</span></span>
+      <button class="step" id="plus" aria-label="Raise alert speed by 5">+</button>
+    </div>
+  </div>
+  <div class="row">
+    <button id="openSettings" aria-haspopup="dialog">Settings</button>
+    <button id="toggle" class="primary">Start</button>
+  </div>
+</div>
+
+<div id="sheet" hidden>
+  <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sTitle">
+    <h2 id="sTitle">Alert settings</h2>
+
+    <div class="field">
+      <label class="switch" for="repeat"><span>Repeat until speed drops below the alert speed</span><input id="repeat" type="checkbox"></label>
+      <p class="hint">Waits half a second after each announcement finishes, however long your phrase is.</p>
+    </div>
+    <div class="field">
+      <label class="switch" for="vibrate"><span>Vibrate with each alert</span><input id="vibrate" type="checkbox"></label>
+      <p class="hint" id="vibrateHint">Works on Android. iPhones don’t allow web apps to vibrate.</p>
+    </div>
+
+    <div class="field">
+      <label for="phrase">What to say</label>
+      <input id="phrase" type="text" maxlength="80" autocomplete="off" enterkeyhint="done" placeholder="Check Speed">
+      <p class="hint">Spoken when you reach the alert speed. Leave it blank to use “Check Speed”.</p>
+    </div>
+
+    <div class="field">
+      <label for="voice">Voice</label>
+      <select id="voice"></select>
+      <p class="hint" id="voiceHint">Lists the English voices installed on this device. To add more, install voices in your phone’s text-to-speech settings.</p>
+    </div>
+
+    <div class="sheet-actions">
+      <button id="testVoice">Test voice</button>
+      <button id="closeSettings" class="primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const MS_TO_MPH = 2.23694;
+
+/* ---------- settings (persisted) ---------- */
+const DEFAULT_PHRASE = 'Check Speed';
+const defaults = { limit: 65, repeat: false, vibrate: false, voice: '', phrase: DEFAULT_PHRASE };
+let cfg = { ...defaults };
+try { Object.assign(cfg, JSON.parse(localStorage.getItem('speedcheck') || '{}')); } catch(e){}
+const save = () => { try { localStorage.setItem('speedcheck', JSON.stringify(cfg)); } catch(e){} };
+const clampLimit = n => Math.min(200, Math.max(5, Math.round(+n) || defaults.limit));
+
+/* ---------- voice ---------- */
+const FEMALE_US = /samantha|ava\b|allison|susan|victoria|zira|aria|jenny|michelle|joanna|salli|kendra|kimberly|ivy|emma|nicky|female/i;
+const MALE_US = /\b(david|mark|alex|fred|tom|guy|aaron|eric|christopher|matthew|joey|justin|male)\b/i;
+const vid = v => v.voiceURI || v.name;
+let chosenVoice = null;
+
+function autoVoice(all) {
+  const us = all.filter(v => /^en[-_]US$/i.test(v.lang));
+  return us.find(v => FEMALE_US.test(v.name) && !MALE_US.test(v.name))
+      || us.find(v => /google us english/i.test(v.name))
+      || us.find(v => /en-us-x-(sfg|tpf|tpc|iog)/i.test(v.name + ' ' + vid(v)))
+      || null; // null = device default en-US voice
+}
+
+function loadVoices() {
+  if (!('speechSynthesis' in window)) { $('voice').disabled = true; return; }
+  const all = speechSynthesis.getVoices();
+  const en = all.filter(v => /^en/i.test(v.lang))
+    .sort((a, b) => (/^en[-_]US$/i.test(b.lang) - /^en[-_]US$/i.test(a.lang)) || a.name.localeCompare(b.name));
+  const sel = $('voice');
+  sel.innerHTML = '';
+  sel.add(new Option('Automatic (US English, female if available)', ''));
+  en.forEach(v => sel.add(new Option(`${v.name} (${v.lang.replace('_','-')})${v.localService ? '' : ' · online'}`, vid(v))));
+  if (cfg.voice && !en.some(v => vid(v) === cfg.voice)) cfg.voice = ''; // saved voice no longer installed
+  sel.value = cfg.voice;
+  chosenVoice = cfg.voice ? en.find(v => vid(v) === cfg.voice) : autoVoice(all);
+}
+if ('speechSynthesis' in window) {
+  loadVoices();
+  speechSynthesis.addEventListener('voiceschanged', loadVoices);
+}
+
+let speakToken = 0, repeatTimer = null, doneTimer = null, isOver = false;
+const GAP_MS = 500; // pause after an announcement finishes before repeating
+
+// onDone(ok) fires once when speech ends (ok=false if the browser refused to speak).
+// A fallback timer covers Android engines that sometimes never fire "end".
+function speak(text, onDone) {
+  if (!('speechSynthesis' in window)) return;
+  clearTimeout(doneTimer); clearTimeout(repeatTimer);
+  const token = ++speakToken;       // lets us ignore events from cancelled utterances
+  let finished = false;
+  const finish = ok => {
+    if (finished || token !== speakToken) return;
+    finished = true; clearTimeout(doneTimer);
+    if (onDone) onDone(ok);
+  };
+  if (speechSynthesis.speaking) speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 1; u.volume = 1;
+  if (chosenVoice) { u.voice = chosenVoice; u.lang = chosenVoice.lang; } else { u.lang = 'en-US'; }
+  u.onend = () => finish(true);
+  u.onerror = e => { if (e.error !== 'interrupted' && e.error !== 'canceled') finish(false); };
+  speechSynthesis.speak(u);
+  if (onDone) doneTimer = setTimeout(() => finish(true), 3000 + text.length * 150);
+}
+
+const phrase = () => (cfg.phrase || '').trim() || DEFAULT_PHRASE;
+function announce() {
+  if (cfg.vibrate && navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  speak(phrase(), ok => {
+    if (!ok || !cfg.repeat) return;
+    repeatTimer = setTimeout(() => { if (cfg.repeat && isOver && watchId !== null) announce(); }, GAP_MS);
+  });
+}
+
+/* ---------- speed tracking ---------- */
+let watchId = null, wakeLock = null, armed = true, lastFix = null;
+
+function haversine(a, b) {
+  const R = 6371000, r = x => x * Math.PI / 180;
+  const h = Math.sin(r(b.latitude - a.latitude)/2)**2 + Math.cos(r(a.latitude))*Math.cos(r(b.latitude))*Math.sin(r(b.longitude - a.longitude)/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function mphFrom(pos) {
+  const c = pos.coords;
+  if (c.speed != null && !isNaN(c.speed)) return c.speed * MS_TO_MPH;
+  if (lastFix) { const dt = (pos.timestamp - lastFix.timestamp) / 1000; if (dt > 0) return haversine(lastFix.coords, c) / dt * MS_TO_MPH; }
+  return 0;
+}
+
+function onFix(pos) {
+  const mph = mphFrom(pos);
+  lastFix = pos;
+  $('speed').textContent = Math.round(mph);
+  $('status').textContent = 'GPS locked';
+  const over = mph >= cfg.limit;
+  document.body.classList.toggle('over', over);
+  isOver = over;
+  if (over && armed) { armed = false; announce(); } // repeats (if enabled) are driven by announce() itself
+  if (mph < cfg.limit - 3) armed = true; // re-arm after dropping 3 mph below the limit
+}
+
+function onError(err) {
+  $('status').textContent = { 1: 'Location permission denied. Allow location access in your browser settings.',
+    2: 'Location unavailable. Check that GPS is on.', 3: 'Waiting for GPS signal…' }[err.code] || 'Location error';
+  if (err.code === 1) stop();
+}
+
+async function keepAwake() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e){} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && watchId !== null) keepAwake(); });
+
+function start() {
+  if (!('geolocation' in navigator)) { $('status').textContent = 'This device has no GPS support.'; return; }
+  if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } // unlock speech
+  $('status').textContent = 'Finding GPS signal…';
+  watchId = navigator.geolocation.watchPosition(onFix, onError, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+  keepAwake(); armed = true; lastFix = null;
+  $('toggle').textContent = 'Stop'; $('toggle').classList.add('on');
+}
+function stop() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  watchId = null; lastFix = null;
+  if (wakeLock) { wakeLock.release().catch(()=>{}); wakeLock = null; }
+  clearTimeout(repeatTimer); clearTimeout(doneTimer); speakToken++; isOver = false;
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  document.body.classList.remove('over');
+  $('speed').textContent = '--';
+  $('toggle').textContent = 'Start'; $('toggle').classList.remove('on');
+}
+$('toggle').addEventListener('click', () => watchId === null ? start() : stop());
+
+/* ---------- UI wiring ---------- */
+function setLimit(n) { cfg.limit = clampLimit(n); $('limit').value = cfg.limit; armed = true; save(); }
+$('limit').value = cfg.limit = clampLimit(cfg.limit);
+$('minus').addEventListener('click', () => setLimit(cfg.limit - 5));
+$('plus').addEventListener('click', () => setLimit(cfg.limit + 5));
+$('limit').addEventListener('change', e => setLimit(e.target.value));
+
+$('repeat').checked = !!cfg.repeat;
+$('vibrate').checked = !!cfg.vibrate;
+$('vibrate').addEventListener('change', e => {
+  cfg.vibrate = e.target.checked; save();
+  if (cfg.vibrate && navigator.vibrate) navigator.vibrate(150); // quick buzz as confirmation
+});
+if (!navigator.vibrate) { $('vibrate').disabled = true; $('vibrateHint').textContent = 'This browser doesn’t support vibration.'; }
+$('repeat').addEventListener('change', e => { cfg.repeat = e.target.checked; save(); });
+$('voice').addEventListener('change', e => { cfg.voice = e.target.value; save(); loadVoices(); speak(phrase()); });
+$('phrase').value = cfg.phrase === DEFAULT_PHRASE ? '' : cfg.phrase;
+$('phrase').addEventListener('input', e => { cfg.phrase = e.target.value.slice(0, 80); save(); });
+$('testVoice').addEventListener('click', () => speak(phrase()));
+
+const openSheet = () => { $('sheet').hidden = false; $('closeSettings').focus(); };
+const closeSheet = () => { $('sheet').hidden = true; $('openSettings').focus(); };
+$('openSettings').addEventListener('click', openSheet);
+$('closeSettings').addEventListener('click', closeSheet);
+$('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(); });
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
