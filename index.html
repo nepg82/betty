@@ -77,7 +77,7 @@ select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:
   <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sTitle">
     <div class="sheet-header">
       <h2 id="sTitle">Alert settings</h2>
-      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261120-0930</button>
+      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261122-0141</button>
     </div>
 
     <div class="field">
@@ -196,16 +196,30 @@ function haversine(a, b) {
 }
 function mphFrom(pos) {
   const c = pos.coords;
-  if (c.speed != null && !isNaN(c.speed)) return c.speed * MS_TO_MPH;
-  if (lastFix) { const dt = (pos.timestamp - lastFix.timestamp) / 1000; if (dt > 0) return haversine(lastFix.coords, c) / dt * MS_TO_MPH; }
-  return 0;
+  if (c.speed != null && !isNaN(c.speed)) return { mph: c.speed * MS_TO_MPH, src: 'GPS speed' };
+  // No speed from the device: estimate from distance between two decent fixes
+  if (lastFix && c.accuracy <= 50) {
+    const dt = (pos.timestamp - lastFix.timestamp) / 1000;
+    if (dt >= 0.5 && dt <= 10) return { mph: haversine(lastFix.coords, c) / dt * MS_TO_MPH, src: 'estimated' };
+  }
+  return null;
 }
 
 function onFix(pos) {
-  const mph = mphFrom(pos);
+  const r = mphFrom(pos);
   lastFix = pos;
+  const acc = Math.round(pos.coords.accuracy);
+  if (!r) {
+    $('speed').textContent = '--';
+    $('status').textContent = acc > 100
+      ? `Approximate location only (±${acc} m). Real GPS speed needs a phone outdoors.`
+      : `Location found (±${acc} m). Waiting for a speed reading…`;
+    document.body.classList.remove('over'); isOver = false;
+    return;
+  }
+  const mph = r.mph;
   $('speed').textContent = Math.round(mph);
-  $('status').textContent = 'GPS locked';
+  $('status').textContent = `GPS locked · ±${acc} m · ${r.src}`;
   const over = mph >= cfg.limit;
   document.body.classList.toggle('over', over);
   isOver = over;
