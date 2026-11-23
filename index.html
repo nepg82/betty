@@ -10,15 +10,24 @@
 <link rel="apple-touch-icon" href="app-icons/app-icon-192.png">
 <title>Betty</title>
 <style>
-:root{--bg:#12203a;--fg:#eef2f6;--muted:#8fa3bf;--ok:#5fd0b0;--warn:#ff5a3c;--panel:#1b2d4d}
+:root{--bg:#000;--fg:#eef2f6;--muted:#8fa3bf;--ok:#5fd0b0;--warn:#ff5a3c;--panel:#1b2d4d}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
  display:flex;flex-direction:column;padding:env(safe-area-inset-top) 20px env(safe-area-inset-bottom);transition:background .2s}
 body.over{background:var(--warn);--muted:#ffe3dc;--panel:rgba(0,0,0,.25)}
 main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:0}
-#speed{font-size:min(44vw,38vh);font-weight:800;line-height:.9;font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+#speed{font-size:min(50vw,50vh);font-weight:normal;line-height:.9;letter-spacing:-.04em;font-family:'DSEG14',system-ui,sans-serif}
 #unit{font-size:1.4rem;color:var(--muted);margin-top:.4rem}
+
+@font-face{
+  font-family:'DSEG14';
+  src:url('font/dseg14classic_italic.ttf') format('truetype');
+  font-weight:normal;
+  font-style:italic;
+  font-display:swap;
+}
+
 #status{margin-top:1.2rem;min-height:1.4em;color:var(--muted)}
 .controls{display:flex;flex-direction:column;gap:12px;padding:8px 0 18px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -49,11 +58,13 @@ select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:
 .sheet-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 14px}
 .sheet-header h2{margin:0;font-size:1.3rem}
 .debug-stamp{background:none;border:0;border-radius:6px;min-height:0;padding:0;font:inherit;cursor:pointer;text-align:right;flex-shrink:0}
+body.over.speed-only-alert{background:var(--bg);--muted:#8fa3bf;--panel:#1b2d4d}
+body.over.speed-only-alert #speed{color:var(--warn)}
 </style>
 </head>
 <body>
 <main>
-  <div id="speed">--</div>
+  <div id="speed">188</div>
   <div id="unit">mph</div>
   <div id="status">Tap Start to begin tracking</div>
 </main>
@@ -77,7 +88,7 @@ select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:
   <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sTitle">
     <div class="sheet-header">
       <h2 id="sTitle">Alert settings</h2>
-      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261120-0930</button>
+      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261123-1028</button>
     </div>
 
     <div class="field">
@@ -105,6 +116,12 @@ select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:
       <button id="testVoice">Test voice</button>
       <button id="closeSettings" class="primary">Done</button>
     </div>
+    
+    <div class="field">
+	  <label class="switch" for="speedOnlyAlert"><span>Flash only the speed digits instead of the whole screen</span><input id="speedOnlyAlert" type="checkbox"></label>
+	  <p class="hint">When off, exceeding the alert speed tints the entire screen red.</p>
+	</div>
+
   </div>
 </div>
 
@@ -114,7 +131,7 @@ const MS_TO_MPH = 2.23694;
 
 /* ---------- settings (persisted) ---------- */
 const DEFAULT_PHRASE = 'Check Speed';
-const defaults = { limit: 65, repeat: false, vibrate: false, voice: '', phrase: DEFAULT_PHRASE };
+const defaults = { limit: 65, repeat: false, vibrate: false, voice: '', phrase: DEFAULT_PHRASE, speedOnlyAlert: false};
 let cfg = { ...defaults };
 try { Object.assign(cfg, JSON.parse(localStorage.getItem('speedcheck') || '{}')); } catch(e){}
 const save = () => { try { localStorage.setItem('speedcheck', JSON.stringify(cfg)); } catch(e){} };
@@ -204,13 +221,15 @@ function mphFrom(pos) {
 function onFix(pos) {
   const mph = mphFrom(pos);
   lastFix = pos;
-  $('speed').textContent = Math.round(mph);
+  const twoDigits = (Math.round(mph) % 100).toString().padStart(2, '0');
+  $('speed').textContent = twoDigits;
   $('status').textContent = 'GPS locked';
   const over = mph >= cfg.limit;
   document.body.classList.toggle('over', over);
+  document.body.classList.toggle('speed-only-alert', over && !!cfg.speedOnlyAlert);
   isOver = over;
-  if (over && armed) { armed = false; announce(); } // repeats (if enabled) are driven by announce() itself
-  if (mph < cfg.limit - 3) armed = true; // re-arm after dropping 3 mph below the limit
+  if (over && armed) { armed = false; announce(); }
+  if (mph < cfg.limit - 3) armed = true;
 }
 
 function onError(err) {
@@ -237,6 +256,7 @@ function stop() {
   clearTimeout(repeatTimer); clearTimeout(doneTimer); speakToken++; isOver = false;
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   document.body.classList.remove('over');
+  document.body.classList.remove('speed-only-alert');
   $('speed').textContent = '--';
   $('toggle').textContent = 'Start'; $('toggle').classList.remove('on');
 }
@@ -251,12 +271,18 @@ $('limit').addEventListener('change', e => setLimit(e.target.value));
 
 $('repeat').checked = !!cfg.repeat;
 $('vibrate').checked = !!cfg.vibrate;
+$('speedOnlyAlert').checked = !!cfg.speedOnlyAlert;
 $('vibrate').addEventListener('change', e => {
   cfg.vibrate = e.target.checked; save();
   if (cfg.vibrate && navigator.vibrate) navigator.vibrate(150); // quick buzz as confirmation
 });
 if (!navigator.vibrate) { $('vibrate').disabled = true; $('vibrateHint').textContent = 'This browser doesn’t support vibration.'; }
 $('repeat').addEventListener('change', e => { cfg.repeat = e.target.checked; save(); });
+$('speedOnlyAlert').addEventListener('change', e => {
+  cfg.speedOnlyAlert = e.target.checked;
+  save();
+  document.body.classList.toggle('speed-only-alert', isOver && !!cfg.speedOnlyAlert);
+});
 $('voice').addEventListener('change', e => { cfg.voice = e.target.value; save(); loadVoices(); speak(phrase()); });
 $('phrase').value = cfg.phrase === DEFAULT_PHRASE ? '' : cfg.phrase;
 $('phrase').addEventListener('input', e => { cfg.phrase = e.target.value.slice(0, 80); save(); });

@@ -1,5 +1,5 @@
-const CACHE = 'speedcheck-v1.0.7';
-const ASSETS = ['./', './index.html', './manifest.json', './app-icons/app-icon-192.png', './app-icons/app-icon-512.png'];
+const CACHE = 'speedcheck-v1.0.8';
+const ASSETS = ['./', './index.html', './manifest.json', './app-icons/app-icon-192.png', './app-icons/app-icon-512.png', './font/dseg14classic_italic.ttf'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))));
