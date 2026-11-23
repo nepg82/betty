@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="app-icons/app-icon-192.png">
+<link rel="preload" href="font/dseg14classic_italic.ttf" as="font" type="font/ttf" crossorigin>
 <title>Betty</title>
 <style>
 :root{--bg:#000;--fg:#eef2f6;--muted:#8fa3bf;--ok:#5fd0b0;--warn:#ff5a3c;--panel:#1b2d4d}
@@ -25,7 +26,7 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;justify-conten
   src:url('font/dseg14classic_italic.ttf') format('truetype');
   font-weight:normal;
   font-style:italic;
-  font-display:swap;
+  font-display:block;
 }
 
 #status{margin-top:1.2rem;min-height:1.4em;color:var(--muted)}
@@ -60,18 +61,24 @@ select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:
 .debug-stamp{background:none;border:0;border-radius:6px;min-height:0;padding:0;font:inherit;cursor:pointer;text-align:right;flex-shrink:0}
 body.over.speed-only-alert{background:var(--bg);--muted:#8fa3bf;--panel:#1b2d4d}
 body.over.speed-only-alert #speed{color:var(--warn)}
+.stats-row{display:flex;justify-content:flex-end;align-items:center;min-height:1.7rem}
+#tripStats{font-family:'DSEG14',system-ui,sans-serif;font-weight:normal;font-size:2rem;line-height:1;letter-spacing:.02em;color:var(--muted)}
 </style>
 </head>
 <body>
 <main>
-  <div id="speed">188</div>
+  <div id="speed">88</div>
   <div id="unit">mph</div>
   <div id="status">Tap Start to begin tracking</div>
 </main>
 
 <div class="controls">
+  <div class="stats-row">
+	<span id="tripStats" aria-label="Max and average speed">--/--</span>
+  </div>
+  
   <div class="row">
-    <div class="stepper" role="group" aria-label="Alert speed">
+      <div class="stepper" role="group" aria-label="Alert speed">
       <span class="lbl">Alert at</span>
       <button class="step" id="minus" aria-label="Lower alert speed by 5">−</button>
       <span class="mid"><input id="limit" type="number" inputmode="numeric" min="5" max="200" aria-label="Alert speed in mph"><span class="lbl" style="padding:0">mph</span></span>
@@ -88,44 +95,52 @@ body.over.speed-only-alert #speed{color:var(--warn)}
   <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sTitle">
     <div class="sheet-header">
       <h2 id="sTitle">Alert settings</h2>
-      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261123-1028</button>
+      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261123-1049</button>
     </div>
 
     <div class="field">
       <label class="switch" for="repeat"><span>Repeat until speed drops below the alert speed</span><input id="repeat" type="checkbox"></label>
-      <p class="hint">Waits half a second after each announcement finishes, however long your phrase is.</p>
+      <!-- <p class="hint">Waits half a second after each announcement finishes, however long your phrase is.</p> -->
     </div>
     <div class="field">
       <label class="switch" for="vibrate"><span>Vibrate with each alert</span><input id="vibrate" type="checkbox"></label>
-      <p class="hint" id="vibrateHint">Works on Android. iPhones don’t allow web apps to vibrate.</p>
+      <!-- <p class="hint" id="vibrateHint">Works on Android. iPhones don’t allow web apps to vibrate.</p> -->
     </div>
+
+    <div class="field">
+	  <label class="switch" for="speedOnlyAlert"><span>Flash only the speed digits instead of the whole screen</span><input id="speedOnlyAlert" type="checkbox"></label>
+	  <!-- <p class="hint">When off, exceeding the alert speed tints the entire screen red.</p> -->
+	</div>
 
     <div class="field">
       <label for="phrase">What to say</label>
       <input id="phrase" type="text" maxlength="80" autocomplete="off" enterkeyhint="done" placeholder="Check Speed">
-      <p class="hint">Spoken when you reach the alert speed. Leave it blank to use “Check Speed”.</p>
+      <!-- <p class="hint">Spoken when you reach the alert speed. Leave it blank to use “Check Speed”.</p> -->
     </div>
 
     <div class="field">
       <label for="voice">Voice</label>
       <select id="voice"></select>
-      <p class="hint" id="voiceHint">Lists the English voices installed on this device. To add more, install voices in your phone’s text-to-speech settings.</p>
+      <!-- <p class="hint" id="voiceHint">Lists the English voices installed on this device. To add more, install voices in your phone’s text-to-speech settings.</p> -->
     </div>
 
     <div class="sheet-actions">
       <button id="testVoice">Test voice</button>
       <button id="closeSettings" class="primary">Done</button>
     </div>
-    
-    <div class="field">
-	  <label class="switch" for="speedOnlyAlert"><span>Flash only the speed digits instead of the whole screen</span><input id="speedOnlyAlert" type="checkbox"></label>
-	  <p class="hint">When off, exceeding the alert speed tints the entire screen red.</p>
-	</div>
-
   </div>
 </div>
 
 <script>
+let maxMph = 0, speedSum = 0, speedCount = 0;
+
+function formatStats() {
+  if (!speedCount) return '--/--';
+  const maxVal = Math.round(maxMph);
+  const avgVal = Math.round(speedSum / speedCount);
+  return `${maxVal}/${avgVal}`;
+}
+
 const $ = id => document.getElementById(id);
 const MS_TO_MPH = 2.23694;
 
@@ -221,6 +236,10 @@ function mphFrom(pos) {
 function onFix(pos) {
   const mph = mphFrom(pos);
   lastFix = pos;
+  if (mph > maxMph) maxMph = mph;
+  speedSum += mph;
+  speedCount += 1;
+  $('tripStats').textContent = formatStats();
   const twoDigits = (Math.round(mph) % 100).toString().padStart(2, '0');
   $('speed').textContent = twoDigits;
   $('status').textContent = 'GPS locked';
@@ -247,7 +266,8 @@ function start() {
   $('status').textContent = 'Finding GPS signal…';
   watchId = navigator.geolocation.watchPosition(onFix, onError, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
   keepAwake(); armed = true; lastFix = null;
-  $('toggle').textContent = 'Stop'; $('toggle').classList.add('on');
+  maxMph = 0; speedSum = 0; speedCount = 0;
+  $('tripStats').textContent = '--/--';
 }
 function stop() {
   if (watchId !== null) navigator.geolocation.clearWatch(watchId);
