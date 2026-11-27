@@ -61,8 +61,11 @@ select{font:1rem system-ui,sans-serif;min-height:48px;border-radius:12px;border:
 .debug-stamp{background:none;border:0;border-radius:6px;min-height:0;padding:0;font:inherit;cursor:pointer;text-align:right;flex-shrink:0}
 body.over.speed-only-alert{background:var(--bg);--muted:#8fa3bf;--panel:#1b2d4d}
 body.over.speed-only-alert #speed{color:var(--warn)}
-.stats-row{display:flex;justify-content:flex-end;align-items:center;min-height:1.7rem}
+.stats-row{display:flex;flex-direction:column;align-items:flex-end}
+#statsLbl{color:var(--muted)}
 #tripStats{font-family:'DSEG14',system-ui,sans-serif;font-weight:normal;font-size:2rem;line-height:1;letter-spacing:.02em;color:var(--muted)}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#fff;color:#12203a;font-weight:700;padding:12px 18px;border-radius:12px;z-index:10;box-shadow:0 4px 16px rgba(0,0,0,.4)}
+#toast[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -74,7 +77,8 @@ body.over.speed-only-alert #speed{color:var(--warn)}
 
 <div class="controls">
   <div class="stats-row">
-	<span id="tripStats" aria-label="Max and average speed">--/--</span>
+	<span id="statsLbl">max / avg</span>
+    <span id="tripStats" aria-label="Max and average speed">--/--</span>
   </div>
   
   <div class="row">
@@ -91,22 +95,19 @@ body.over.speed-only-alert #speed{color:var(--warn)}
   </div>
 </div>
 
+<div id="toast" role="status" hidden></div>
+
 <div id="sheet" hidden>
   <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sTitle">
     <div class="sheet-header">
       <h2 id="sTitle">Alert settings</h2>
-      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261123-1049</button>
+      <button type="button" id="debugReset" class="hint debug-stamp" title="debug">261126-1950</button>
     </div>
 
     <div class="field">
       <label class="switch" for="repeat"><span>Repeat until speed drops below the alert speed</span><input id="repeat" type="checkbox"></label>
       <!-- <p class="hint">Waits half a second after each announcement finishes, however long your phrase is.</p> -->
     </div>
-    <div class="field">
-      <label class="switch" for="vibrate"><span>Vibrate with each alert</span><input id="vibrate" type="checkbox"></label>
-      <!-- <p class="hint" id="vibrateHint">Works on Android. iPhones don’t allow web apps to vibrate.</p> -->
-    </div>
-
     <div class="field">
 	  <label class="switch" for="speedOnlyAlert"><span>Flash only the speed digits instead of the whole screen</span><input id="speedOnlyAlert" type="checkbox"></label>
 	  <!-- <p class="hint">When off, exceeding the alert speed tints the entire screen red.</p> -->
@@ -132,12 +133,12 @@ body.over.speed-only-alert #speed{color:var(--warn)}
 </div>
 
 <script>
-let maxMph = 0, speedSum = 0, speedCount = 0;
+let maxMph = 0, movingSum = 0, movingTime = 0, speedCount = 0; // avg = time-weighted, moving only
 
 function formatStats() {
   if (!speedCount) return '--/--';
   const maxVal = Math.round(maxMph);
-  const avgVal = Math.round(speedSum / speedCount);
+  const avgVal = movingTime > 0 ? Math.round(movingSum / movingTime) : '--';
   return `${maxVal}/${avgVal}`;
 }
 
@@ -146,7 +147,7 @@ const MS_TO_MPH = 2.23694;
 
 /* ---------- settings (persisted) ---------- */
 const DEFAULT_PHRASE = 'Check Speed';
-const defaults = { limit: 65, repeat: false, vibrate: false, voice: '', phrase: DEFAULT_PHRASE, speedOnlyAlert: false};
+const defaults = { limit: 65, repeat: false, voice: '', phrase: DEFAULT_PHRASE, speedOnlyAlert: false};
 let cfg = { ...defaults };
 try { Object.assign(cfg, JSON.parse(localStorage.getItem('speedcheck') || '{}')); } catch(e){}
 const save = () => { try { localStorage.setItem('speedcheck', JSON.stringify(cfg)); } catch(e){} };
@@ -211,7 +212,6 @@ function speak(text, onDone) {
 
 const phrase = () => (cfg.phrase || '').trim() || DEFAULT_PHRASE;
 function announce() {
-  if (cfg.vibrate && navigator.vibrate) navigator.vibrate([200, 100, 200]);
   speak(phrase(), ok => {
     if (!ok || !cfg.repeat) return;
     repeatTimer = setTimeout(() => { if (cfg.repeat && isOver && watchId !== null) announce(); }, GAP_MS);
@@ -220,6 +220,20 @@ function announce() {
 
 /* ---------- speed tracking ---------- */
 let watchId = null, wakeLock = null, armed = true, lastFix = null;
+const STALE_MS = 6000;   // no fix for this long -> show '--' and clear the alert
+const MOVING_MPH = 3;    // below this, a fix doesn't count toward the average (GPS drift at a standstill)
+const MAX_GAP_S = 5;     // intervals longer than this (signal dropouts) are skipped in the average
+let watchdog = null, lastFixAt = 0, stale = false;
+
+function checkStale() {
+  if (watchId === null || !lastFixAt || stale || Date.now() - lastFixAt < STALE_MS) return;
+  stale = true;
+  $('speed').textContent = '--';
+  $('status').textContent = 'Waiting for GPS signal…';
+  document.body.classList.remove('over', 'speed-only-alert');
+  isOver = false; armed = true; // re-arm so a regained fix that's still over the limit alerts again
+  clearTimeout(repeatTimer);
+}
 
 function haversine(a, b) {
   const R = 6371000, r = x => x * Math.PI / 180;
@@ -235,10 +249,12 @@ function mphFrom(pos) {
 
 function onFix(pos) {
   const mph = mphFrom(pos);
+  const dt = lastFix ? (pos.timestamp - lastFix.timestamp) / 1000 : 0;
   lastFix = pos;
+  lastFixAt = Date.now(); stale = false;
   if (mph > maxMph) maxMph = mph;
-  speedSum += mph;
   speedCount += 1;
+  if (mph >= MOVING_MPH && dt > 0 && dt <= MAX_GAP_S) { movingSum += mph * dt; movingTime += dt; }
   $('tripStats').textContent = formatStats();
   const twoDigits = (Math.round(mph) % 100).toString().padStart(2, '0');
   $('speed').textContent = twoDigits;
@@ -252,6 +268,7 @@ function onFix(pos) {
 }
 
 function onError(err) {
+  if (err.code === 3 && lastFix) return; // a quiet GPS after we already had a fix isn't a failure
   $('status').textContent = { 1: 'Location permission denied. Allow location access in your browser settings.',
     2: 'Location unavailable. Check that GPS is on.', 3: 'Waiting for GPS signal…' }[err.code] || 'Location error';
   if (err.code === 1) stop();
@@ -264,23 +281,29 @@ function start() {
   if (!('geolocation' in navigator)) { $('status').textContent = 'This device has no GPS support.'; return; }
   if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } // unlock speech
   $('status').textContent = 'Finding GPS signal…';
-  watchId = navigator.geolocation.watchPosition(onFix, onError, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
-  keepAwake(); armed = true; lastFix = null;
-  maxMph = 0; speedSum = 0; speedCount = 0;
+  watchId = navigator.geolocation.watchPosition(onFix, onError, { enableHighAccuracy: true, maximumAge: 0 });
+  keepAwake(); armed = true; lastFix = null; lastFixAt = 0; stale = false;
+  maxMph = 0; movingSum = 0; movingTime = 0; speedCount = 0;
   $('tripStats').textContent = '--/--';
+  clearInterval(watchdog); watchdog = setInterval(checkStale, 1000);
+  $('toggle').textContent = 'Stop'; $('toggle').classList.add('on');
 }
 function stop() {
   if (watchId !== null) navigator.geolocation.clearWatch(watchId);
   watchId = null; lastFix = null;
   if (wakeLock) { wakeLock.release().catch(()=>{}); wakeLock = null; }
   clearTimeout(repeatTimer); clearTimeout(doneTimer); speakToken++; isOver = false;
+  clearInterval(watchdog); watchdog = null; lastFixAt = 0; stale = false;
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   document.body.classList.remove('over');
   document.body.classList.remove('speed-only-alert');
   $('speed').textContent = '--';
   $('toggle').textContent = 'Start'; $('toggle').classList.remove('on');
 }
-$('toggle').addEventListener('click', () => watchId === null ? start() : stop());
+$('toggle').addEventListener('click', () => {
+  if (watchId === null) start();
+  else { stop(); $('status').textContent = 'Tap Start to begin tracking'; }
+});
 
 /* ---------- UI wiring ---------- */
 function setLimit(n) { cfg.limit = clampLimit(n); $('limit').value = cfg.limit; armed = true; save(); }
@@ -290,13 +313,7 @@ $('plus').addEventListener('click', () => setLimit(cfg.limit + 5));
 $('limit').addEventListener('change', e => setLimit(e.target.value));
 
 $('repeat').checked = !!cfg.repeat;
-$('vibrate').checked = !!cfg.vibrate;
 $('speedOnlyAlert').checked = !!cfg.speedOnlyAlert;
-$('vibrate').addEventListener('change', e => {
-  cfg.vibrate = e.target.checked; save();
-  if (cfg.vibrate && navigator.vibrate) navigator.vibrate(150); // quick buzz as confirmation
-});
-if (!navigator.vibrate) { $('vibrate').disabled = true; $('vibrateHint').textContent = 'This browser doesn’t support vibration.'; }
 $('repeat').addEventListener('change', e => { cfg.repeat = e.target.checked; save(); });
 $('speedOnlyAlert').addEventListener('change', e => {
   cfg.speedOnlyAlert = e.target.checked;
@@ -310,7 +327,7 @@ $('testVoice').addEventListener('click', () => speak(phrase()));
 
 /* ------------ debug ------------ */
 $('debugReset').addEventListener('click', async () => {
-  $('status').textContent = 'Resetting service worker & cache…';
+  $('toast').textContent = 'Reloading latest version…'; $('toast').hidden = false;
   try {
     if ('serviceWorker' in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
@@ -321,13 +338,15 @@ $('debugReset').addEventListener('click', async () => {
       await Promise.all(keys.map(k => caches.delete(k)));
     }
   } catch (e) {}
+  await new Promise(r => setTimeout(r, 600)); // let the toast be seen
   const url = new URL(location.href);
   url.searchParams.set('_', Date.now());
   location.replace(url.toString());
 });
 
-const openSheet = () => { $('sheet').hidden = false; $('closeSettings').focus(); };
-const closeSheet = () => { $('sheet').hidden = true; $('openSettings').focus(); };
+const setBackgroundInert = on => document.querySelectorAll('main, .controls').forEach(el => { el.inert = on; });
+const openSheet = () => { $('sheet').hidden = false; setBackgroundInert(true); $('closeSettings').focus(); };
+const closeSheet = () => { $('sheet').hidden = true; setBackgroundInert(false); $('openSettings').focus(); };
 $('openSettings').addEventListener('click', openSheet);
 $('closeSettings').addEventListener('click', closeSheet);
 $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
